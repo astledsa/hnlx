@@ -1,0 +1,17 @@
+[project]
+name = "umlx"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Astle Dsa", email = "astledsa@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mlx>=0.23.1",
+    "pydantic>=2.11.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
