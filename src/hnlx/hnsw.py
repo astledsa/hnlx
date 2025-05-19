@@ -129,7 +129,6 @@ class HNSW :
         except Exception as error:
             raise NodeInsertionError(str(error))
     
-    
     def __get_vector_by_cosine_sim__ (
         self, 
         vecIDs: dict[str, None], 
@@ -188,7 +187,7 @@ class HNSW :
         except Exception as error:
             raise NeighbourSelectionError(str(error))
 
-    def __bidirectional_connection__ (self, nodes: dict[str, None], node: str, M: int, layer: int) -> None:
+    def __bidirectional_connection__(self, nodes: dict[str, None], node: str, M: int, layer: int) -> None:
         """
         Establish bidirectional connections between a node and its neighbors.
 
@@ -273,9 +272,9 @@ class HNSW :
                 return 
             
             
-            ep = self.entry_point_id
-            L = self.nodeMap[ep].max_level
-            l = self.__generate_level__(ml, self.max_level)
+            ep: str = self.entry_point_id
+            L: int = self.nodeMap[ep].max_level
+            l: int = self.__generate_level__(ml, self.max_level)
             
             new_node_id: str = self.__insert_node_into_map__(Node(q, l))
             
@@ -295,4 +294,44 @@ class HNSW :
         
         except Exception as error:
             raise InsertionError(str(error))
+    
+    def Search (self, q: Vector, K: int, efsearch: int) -> list[Vector]:
+        """
+        Perform approximate nearest neighbor search for a given query vector.
+        
+        Args:
+            q (Vector): The query vector to search against the index.
+            K (int): The number of nearest neighbors to return.
+            efsearch (int): The size of the candidate list to explore during search.
+
+        Returns:
+            list[Vector]: A list of vectors representing the closest neighbors, sorted by similarity.
+        """
+        try:
             
+            if not self.entry_point_id :
+                raise Exception('No entry point determined! Insert a point first')
+            
+            if self.entry_point_id not in self.nodeMap:
+                raise NodeNotFoundError('No Entry point stored in the node map')
+            
+            ep: str = self.entry_point_id
+            L: int = self.nodeMap[ep].max_level
+            
+            for l_c in range(L, 0, -1):
+                W: dict[str, None] = self.__search_layer__(q, ep, efsearch, l_c)
+                ep: str = self.__get_vector_by_cosine_sim__(W, q, 'nearest')
+            
+            nearest_ids: dict[str, None] = self.__search_layer__(q, ep, efsearch, 0)
+            sorted_vectors: list[Vector] = [
+                self.nodeMap[id].vector for id in sorted(
+                    nearest_ids.keys(), 
+                    key=lambda id: self.__cos_sim__(id, q), 
+                    reverse=True
+                )
+            ]
+            
+            return sorted_vectors if len(sorted_vectors) < K else sorted_vectors[:K]
+        
+        except Exception as error:
+            raise SearchError(str(error))

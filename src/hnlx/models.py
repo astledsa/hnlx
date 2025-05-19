@@ -46,3 +46,8 @@ class InsertionError (Exception):
     """Raise when there's an error in inserting a vector"""
     def __init__(self, message: str) -> None:
         super().__init__(f"Error while inserting the vector: {message}")
+
+class SearchError (Exception):
+    """Raise while performing K-NN search over the index"""
+    def __init__(self, message: str) -> None:
+        super().__init__(f"Error while search the vector over the index: {message}")
