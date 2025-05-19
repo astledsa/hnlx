@@ -7,8 +7,16 @@ import mlx.core as mx
 from typing import Literal, Optional
 
 class Node :
+    """Represents a node in the HNSW graph with vector data and neighbors across levels."""
     
     def __init__(self, vector: Vector, level: int) -> None:
+        """
+        Initialize a node with a vector and level.
+
+        Args:
+            vector (Vector): The vector representation of the node.
+            level (int): The maximum level of the node in the graph.
+        """
         self.max_level: int = level
         self.vector: Vector = vector
         self.neighbours: dict[int, dict[str, None]] = {
@@ -16,14 +24,32 @@ class Node :
         }
     
     def __eq__(self, other: object) -> bool:
+        """
+        Checks equality between nodes based on their vectors.
+
+        Args:
+            other (object): The other node to compare.
+
+        Returns:
+            bool: True if vectors are equal, else False.
+        """
         if not isinstance(other, Node):
             return False
         return bool(self.vector == other.vector)
         
     
 class HNSW :
+    """Hierarchical Navigable Small World (HNSW) graph for approximate nearest neighbor search."""
     
     def __init__(self, M: int, efc: int, max_level: int) -> None:
+        """
+        Initialize the HNSW graph.
+
+        Args:
+            M (int): Maximum number of connections per node.
+            efc (int): Size of the dynamic candidate list during construction.
+            max_level (int): Maximum level allowed in the hierarchy.
+        """
         self.M: int = M
         self.total_nodes: int = 0
         self.efconstruction: int = efc
@@ -32,6 +58,16 @@ class HNSW :
         self.entry_point_id: Optional[str] = None
     
     def __generate_level__ (self, ml: float, max_level: int) -> int:
+        """
+        Generate a random level for a new node using an exponential distribution.
+
+        Args:
+            ml (float): Multiplier for level distribution.
+            max_level (int): Maximum level allowed.
+
+        Returns:
+            int: The generated level.
+        """
         try:
             return min(int(-math.log(random.random())*ml), max_level)
         
@@ -39,13 +75,31 @@ class HNSW :
             raise LevelGenerationError(str(error))
     
     def __get_node_from_map__ (self, id: str) -> Node :
-        
+        """
+        Retrieve a node by ID.
+
+        Args:
+            id (str): Node ID.
+
+        Returns:
+            Node: The corresponding node.
+        """
         if id not in self.nodeMap:
             raise NodeNotFoundError(id)
         
         return self.nodeMap[id]
     
     def __cos_sim__ (self, nodeID: str, q: Vector) -> float:
+        """
+        Compute cosine similarity between a node's vector and a query vector.
+
+        Args:
+            nodeID (str): Node ID.
+            q (Vector): Query vector.
+
+        Returns:
+            float: Cosine similarity score.
+        """
         try:
             
             node = self.__get_node_from_map__(nodeID)
@@ -58,7 +112,15 @@ class HNSW :
             raise CosineSimilarityError(str(error))
     
     def __insert_node_into_map__ (self, node: Node) -> str :
-        
+        """
+        Insert a new node into the graph and assign it a unique ID.
+
+        Args:
+            node (Node): Node to insert.
+
+        Returns:
+            str: Assigned node ID.
+        """
         try:
             id: str = str(uuid.UUID())
             self.nodeMap[id] = node
@@ -74,7 +136,17 @@ class HNSW :
         q: Vector, 
         dist: Literal['nearest', 'furthest']
     ) -> str :
-        
+        """
+        Find a vector from a set that is closest or farthest to the query.
+
+        Args:
+            vecIDs (dict[str, None]): Candidate node IDs.
+            q (Vector): Query vector.
+            dist (Literal['nearest', 'furthest']): Distance type to compare.
+
+        Returns:
+            str: ID of the selected vector.
+        """
         try:            
             matrix = mx.stack(
                 list(
@@ -97,7 +169,17 @@ class HNSW :
             raise CosineSimDistanceError(str(error))
     
     def __select_neighbours__ (self, point: Vector, ids: dict[str, None], M: int) -> dict[str, None]:
-        
+        """
+        Select top M closest neighbors to a given point.
+
+        Args:
+            point (Vector): Reference vector.
+            ids (dict[str, None]): Candidate node IDs.
+            M (int): Maximum neighbors to select.
+
+        Returns:
+            dict[str, None]: Selected neighbor IDs.
+        """
         try:
             id_dist_map: dict[str, float] = {id: self.__cos_sim__(id, point) for id in ids.keys()}
             sorted_keys: list[str] = sorted(id_dist_map.keys(), key=lambda k: id_dist_map[k], reverse=True)[:M]
@@ -107,7 +189,15 @@ class HNSW :
             raise NeighbourSelectionError(str(error))
 
     def __bidirectional_connection__ (self, nodes: dict[str, None], node: str, M: int, layer: int) -> None:
-        
+        """
+        Establish bidirectional connections between a node and its neighbors.
+
+        Args:
+            nodes (dict[str, None]): Neighbor IDs.
+            node (str): Node ID.
+            M (int): Max number of neighbors.
+            layer (int): Layer index.
+        """
         try:
             for node1 in nodes.keys() :
                 self.nodeMap[node1].neighbours[layer][node] = None
@@ -128,7 +218,18 @@ class HNSW :
             raise BidirectionalConnectionError(str(error))
         
     def __search_layer__ (self, q: Vector, ep: str, ef: int, layer: int) -> dict[str, None] :
-        
+        """
+        Perform greedy search at a given layer.
+
+        Args:
+            q (Vector): Query vector.
+            ep (str): Entry point ID.
+            ef (int): Size of the candidate list.
+            layer (int): Layer index.
+
+        Returns:
+            dict[str, None]: Found neighbor IDs.
+        """
         try:
             visited: dict[str, None] = {ep: None}
             candidates: dict[str, None] = {ep: None}
@@ -156,7 +257,12 @@ class HNSW :
             raise SearchLayerError(str(error))
     
     def Insert (self, q: Vector) -> None:
-        
+        """
+        Insert a vector into the HNSW graph.
+
+        Args:
+            q (Vector): The vector to insert.
+        """
         try:
             ml = 1 / (-math.log(1 - (1 / self.M)))
             
