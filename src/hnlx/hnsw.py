@@ -1,10 +1,11 @@
 import uuid
 import math
+import pickle
 import random
 import mlx.nn as nn
 from .models import *
 import mlx.core as mx
-from typing import Literal, Optional
+from typing import Literal, Optional, Callable
 
 class Node :
     """Represents a node in the HNSW graph with vector data and neighbors across levels."""
@@ -36,12 +37,11 @@ class Node :
         if not isinstance(other, Node):
             return False
         return bool(self.vector == other.vector)
-        
-    
+                    
 class HNSW :
     """Hierarchical Navigable Small World (HNSW) graph for approximate nearest neighbor search."""
     
-    def __init__(self, M: int, efc: int, max_level: int) -> None:
+    def __init__(self, M: int, efc: int, max_level: int, dist: distance = 'Cosine') -> None:
         """
         Initialize the HNSW graph.
 
@@ -56,7 +56,25 @@ class HNSW :
         self.max_level: int = max_level
         self.nodeMap: dict[str, Node] = {}
         self.entry_point_id: Optional[str] = None
-    
+        
+        if dist == 'Manhattan':
+            self.distance: Callable[[str, Vector], float] = self.__manhattan__
+            
+        elif dist == 'Eucilidean':
+            self.distance: Callable[[str, Vector], float] = self.__euclidean__
+            
+        elif dist == 'Hamming':
+            self.distance: Callable[[str, Vector], float] = self.__hamming__
+            
+        elif dist == 'Inner':
+            self.distance: Callable[[str, Vector], float] = self.__inner_product__
+            
+        elif dist == 'Jaccard':
+            self.distance: Callable[[str, Vector], float] = self.__jaccard__
+            
+        else:
+            self.distance: Callable[[str, Vector], float] = self.__cos_sim__
+        
     def __generate_level__ (self, ml: float, max_level: int) -> int:
         """
         Generate a random level for a new node using an exponential distribution.
@@ -111,6 +129,120 @@ class HNSW :
         except Exception as error:
             raise CosineSimilarityError(str(error))
     
+    def __euclidean__ (self, nodeID: str, q: Vector) -> float:
+        """
+        Compute euclidean distance between a node's vector and a query vector.
+
+        Args:
+            nodeID (str): Node ID.
+            q (Vector): Query vector.
+
+        Returns:
+            float: Euclidean distance.
+        """
+        try:
+            
+            node = self.__get_node_from_map__(nodeID)
+            return float(mx.sqrt(mx.sum((node.vector - q) ** 2)))
+            
+        except NodeNotFoundError as e:
+            raise e
+        
+        except Exception as error:
+            raise EuclideanDistanceError(str(error))
+    
+    def __manhattan__ (self, nodeID: str, q: Vector) -> float:
+        """
+        Compute manhattan distance between a node's vector and a query vector.
+
+        Args:
+            nodeID (str): Node ID.
+            q (Vector): Query vector.
+
+        Returns:
+            float: Manhattan distance.
+        """
+        try:
+            
+            node = self.__get_node_from_map__(nodeID)
+            return float(mx.sum(mx.abs(node.vector -q)))
+            
+        except NodeNotFoundError as e:
+            raise e
+        
+        except Exception as error:
+            raise ManhattanDistanceError(str(error))
+    
+    def __inner_product__ (self, nodeID: str, q: Vector) -> float:
+        """
+        Compute inner product between a node's vector and a query vector.
+
+        Args:
+            nodeID (str): Node ID.
+            q (Vector): Query vector.
+
+        Returns:
+            float: Negative inner product.
+        """
+        try:
+            
+            node = self.__get_node_from_map__(nodeID)
+            return float(mx.sum(node.vector * q))
+            
+        except NodeNotFoundError as e:
+            raise e
+        
+        except Exception as error:
+            raise InnerProductError(str(error))
+    
+    def __hamming__ (self, nodeID: str, q: Vector) -> float:
+        """
+        Compute hamming distance between a node's vector and a query vector.
+
+        Args:
+            nodeID (str): Node ID.
+            q (Vector): Query vector.
+
+        Returns:
+            float: Hamming distance.
+        """
+        try:
+            
+            node = self.__get_node_from_map__(nodeID)
+            return float(mx.sum(mx.array((node.vector != q)).astype(mx.float16)))
+            
+        except NodeNotFoundError as e:
+            raise e
+        
+        except Exception as error:
+            raise HammingDistanceError(str(error))
+    
+    def __jaccard__ (self, nodeID: str, q: Vector) -> float:
+        """
+        Compute jaccard between a node's vector and a query vector.
+
+        Args:
+            nodeID (str): Node ID.
+            q (Vector): Query vector.
+
+        Returns:
+            float: Jaccard distance.
+        """
+        try:
+            
+            node = self.__get_node_from_map__(nodeID)
+            intersection = mx.sum(mx.logical_and(node.vector, q))
+            union = mx.sum(mx.logical_or(node.vector, q))
+            jaccard_similarity = intersection / union
+            jaccard_distance = 1.0 - jaccard_similarity
+            return float(jaccard_distance)
+            
+        except NodeNotFoundError as e:
+            raise e
+        
+        except Exception as error:
+            raise JaccardDistanceError(str(error))
+    
     def __insert_node_into_map__ (self, node: Node) -> str :
         """
         Insert a new node into the graph and assign it a unique ID.
@@ -129,7 +261,7 @@ class HNSW :
         except Exception as error:
             raise NodeInsertionError(str(error))
     
-    def __get_vector_by_cosine_sim__ (
+    def __get_vector_by_distance__ (
         self, 
         vecIDs: dict[str, None], 
         q: Vector, 
@@ -155,10 +287,29 @@ class HNSW :
                     )
                 )
             ).squeeze()
-        
-            dists = nn.losses.cosine_similarity_loss(matrix, q)
+
+            if self.distance == 'Manhattan':
+                dists: Vector = mx.sum(mx.abs(matrix - q), axis=1)
+                
+            elif self.distance == 'Eucilidean':
+                dists: Vector = mx.sqrt(mx.sum((matrix - q) ** 2, axis=1))
+                
+            elif self.distance == 'Hamming':
+                dists: Vector = mx.sum(mx.array(matrix != q), axis=1)
+                
+            elif self.distance == 'Inner':
+                dists: Vector = mx.sum(matrix * q, axis=1)
+                
+            elif self.distance == 'Jaccard':
+                intersection = mx.sum(mx.logical_and(matrix, q), axis=1)
+                union = mx.sum(mx.logical_or(matrix, q), axis=1)
+                jaccard_similarity = intersection / union
+                dists: Vector = 1.0 - jaccard_similarity
+                
+            else:
+                dists: Vector = nn.losses.cosine_similarity_loss(matrix, q)
+            
             idx = int(mx.argmax(dists)) if dist == 'nearest' else int(mx.argmin(dists))
-        
             return list(vecIDs.keys())[idx]
         
         except KeyError as error:
@@ -180,7 +331,7 @@ class HNSW :
             dict[str, None]: Selected neighbor IDs.
         """
         try:
-            id_dist_map: dict[str, float] = {id: self.__cos_sim__(id, point) for id in ids.keys()}
+            id_dist_map: dict[str, float] = {id: self.distance(id, point) for id in ids.keys()}
             sorted_keys: list[str] = sorted(id_dist_map.keys(), key=lambda k: id_dist_map[k], reverse=True)[:M]
             return {k: None for k in sorted_keys}
         
@@ -235,19 +386,19 @@ class HNSW :
             neighbours: dict[str, None] = {ep: None}
             
             while len(candidates) > 0 :
-                c: str = self.__get_vector_by_cosine_sim__ (candidates, q, 'nearest')
-                f: str = self.__get_vector_by_cosine_sim__ (neighbours, q, 'furthest')
+                c: str = self.__get_vector_by_distance__ (candidates, q, 'nearest')
+                f: str = self.__get_vector_by_distance__ (neighbours, q, 'furthest')
                 for e_id in self.nodeMap[c].neighbours[layer] :
                     if e_id not in visited:
                         visited[e_id] = None
-                        f: str = self.__get_vector_by_cosine_sim__ (neighbours, q, 'furthest')
-                        if self.__cos_sim__(e_id, q) < self.__cos_sim__(f, q) or len(neighbours) < ef :
+                        f: str = self.__get_vector_by_distance__ (neighbours, q, 'furthest')
+                        if self.distance(e_id, q) < self.distance(f, q) or len(neighbours) < ef :
                             candidates[e_id] = None
                             neighbours[e_id] = None
                             if len(neighbours) > ef :
-                                f: str = self.__get_vector_by_cosine_sim__ (neighbours, q, 'furthest')
+                                f: str = self.__get_vector_by_distance__ (neighbours, q, 'furthest')
                                 del neighbours[f]
-                if self.__cos_sim__(c, q) < self.__cos_sim__ (f, q) :
+                if self.distance(c, q) < self.distance (f, q) :
                     break
                 del candidates[c]
             return neighbours
@@ -266,7 +417,7 @@ class HNSW :
             ml = 1 / (-math.log(1 - (1 / self.M)))
             
             if self.entry_point_id is None:
-                node_level = self.__generate_level__(ml, self.max_level)
+                node_level: int = self.__generate_level__(ml, self.max_level)
                 self.entry_point_id = self.__insert_node_into_map__(Node(q, node_level))
                 self.total_nodes += 1
                 return 
@@ -280,7 +431,7 @@ class HNSW :
             
             for l_c in range(L, l - 1, -1):
                 W: dict[str, None] = self.__search_layer__(q, ep, 1, l_c)
-                ep: str = self.__get_vector_by_cosine_sim__(W, q, 'nearest')
+                ep: str = self.__get_vector_by_distance__(W, q, 'nearest')
             
             for l_c in range(min(L, l), -1, -1):
                 W: dict[str, None] = self.__search_layer__(q, ep, self.efconstruction, l_c)
@@ -320,13 +471,13 @@ class HNSW :
             
             for l_c in range(L, 0, -1):
                 W: dict[str, None] = self.__search_layer__(q, ep, efsearch, l_c)
-                ep: str = self.__get_vector_by_cosine_sim__(W, q, 'nearest')
+                ep: str = self.__get_vector_by_distance__(W, q, 'nearest')
             
             nearest_ids: dict[str, None] = self.__search_layer__(q, ep, efsearch, 0)
             sorted_vectors: list[Vector] = [
                 self.nodeMap[id].vector for id in sorted(
                     nearest_ids.keys(), 
-                    key=lambda id: self.__cos_sim__(id, q), 
+                    key=lambda id: self.distance(id, q), 
                     reverse=True
                 )
             ]
@@ -335,3 +486,19 @@ class HNSW :
         
         except Exception as error:
             raise SearchError(str(error))
+
+    def Save (self, path: str = 'hnswindex.pkl') -> None:
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
+    
+    @classmethod
+    def Load (cls, path: str) -> None:
+        
+        try:
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        
+        except Exception as error:
+            raise Exception(error)
+    
+    

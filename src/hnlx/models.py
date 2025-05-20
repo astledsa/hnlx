@@ -1,6 +1,8 @@
 import mlx.core as mx
+from typing import Literal
 
 type Vector = mx.array
+type distance = Literal['Cosine', 'Hamming', 'Jaccard', 'Eucilidean', 'Inner', 'Manhattan']
 
 class NodeNotFoundError(Exception):
     """Raised when a node ID is not found in the node map."""
@@ -11,6 +13,31 @@ class CosineSimilarityError(Exception):
     """Raised during cosine similarity calculation."""
     def __init__(self, message: str):
         super().__init__(f"Error calculating cosine similarity: {message}")
+
+class EuclideanDistanceError(Exception):
+    """Raised during euclidean distance calculation."""
+    def __init__(self, message: str):
+        super().__init__(f"Error calculating euclidean distance: {message}")
+
+class ManhattanDistanceError(Exception):
+    """Raised during manhattan distance calculation."""
+    def __init__(self, message: str):
+        super().__init__(f"Error calculating manhattan distance: {message}")
+
+class InnerProductError(Exception):
+    """Raised during inner product calculation."""
+    def __init__(self, message: str):
+        super().__init__(f"Error calculating inner product: {message}")
+
+class HammingDistanceError(Exception):
+    """Raised during hamming distance calculation."""
+    def __init__(self, message: str):
+        super().__init__(f"Error calculating hamming distance: {message}")
+
+class JaccardDistanceError(Exception):
+    """Raised during jaccard distance calculation."""
+    def __init__(self, message: str):
+        super().__init__(f"Error calculating jaccard distance: {message}")
 
 class LevelGenerationError (Exception):
     """Raise this error if the generate level function fails"""
