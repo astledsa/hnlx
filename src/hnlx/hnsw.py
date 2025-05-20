@@ -74,7 +74,18 @@ class HNSW :
             
         else:
             self.distance: Callable[[str, Vector], float] = self.__cos_sim__
-        
+    
+    def __repr__(self) -> str:
+        return f"""
+                HNSW (
+                    M: {self.M}, 
+                    efconstruction: {self.efconstruction}, 
+                    distance: {self.distance}, 
+                    max_level: {self.max_level},
+                    total_nodes: {self.total_nodes}
+                )
+                """
+    
     def __generate_level__ (self, ml: float, max_level: int) -> int:
         """
         Generate a random level for a new node using an exponential distribution.
