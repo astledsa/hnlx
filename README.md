@@ -16,5 +16,5 @@ This is a python library for the implementation of the HNSW graph, utilising the
 
 ## Testing/Benchmarks
 
-- [ ] Basic tests
+- [x] Basic tests
 - [ ] Comparison against popular implementations

@@ -18,10 +18,10 @@ class Node :
             vector (Vector): The vector representation of the node.
             level (int): The maximum level of the node in the graph.
         """
-        self.max_level: int = level
+        self.max_level: int = level if level != 0 else 1
         self.vector: Vector = vector
         self.neighbours: dict[int, dict[str, None]] = {
-            i: dict() for i in range(self.max_level)
+            i: dict() for i in range(self.max_level+1)
         }
     
     def __eq__(self, other: object) -> bool:
@@ -76,6 +76,9 @@ class HNSW :
             self.distance: Callable[[str, Vector], float] = self.__cos_sim__
     
     def __repr__(self) -> str:
+        """
+        For printing and debugging
+        """
         return f"""
                 HNSW (
                     M: {self.M}, 
@@ -132,7 +135,10 @@ class HNSW :
         try:
             
             node = self.__get_node_from_map__(nodeID)
-            return float(nn.losses.cosine_similarity_loss(node.vector, q))
+            return float(nn.losses.cosine_similarity_loss(
+                mx.expand_dims(node.vector, axis=1).T, 
+                mx.expand_dims(q, axis=1).T)
+            )
             
         except NodeNotFoundError as e:
             raise e
@@ -265,7 +271,7 @@ class HNSW :
             str: Assigned node ID.
         """
         try:
-            id: str = str(uuid.UUID())
+            id: str = str(uuid.uuid4())
             self.nodeMap[id] = node
             return id
         
@@ -298,7 +304,9 @@ class HNSW :
                     )
                 )
             ).squeeze()
-
+            
+            matrix = mx.expand_dims(matrix, axis=1).T if len(matrix.shape) < 2 else matrix
+            
             if self.distance == 'Manhattan':
                 dists: Vector = mx.sum(mx.abs(matrix - q), axis=1)
                 
@@ -318,8 +326,8 @@ class HNSW :
                 dists: Vector = 1.0 - jaccard_similarity
                 
             else:
-                dists: Vector = nn.losses.cosine_similarity_loss(matrix, q)
-            
+                dists: Vector = nn.losses.cosine_similarity_loss(matrix, mx.expand_dims(q, axis=1).T)
+                
             idx = int(mx.argmax(dists)) if dist == 'nearest' else int(mx.argmin(dists))
             return list(vecIDs.keys())[idx]
         
@@ -395,18 +403,17 @@ class HNSW :
             visited: dict[str, None] = {ep: None}
             candidates: dict[str, None] = {ep: None}
             neighbours: dict[str, None] = {ep: None}
-            
             while len(candidates) > 0 :
                 c: str = self.__get_vector_by_distance__ (candidates, q, 'nearest')
                 f: str = self.__get_vector_by_distance__ (neighbours, q, 'furthest')
                 for e_id in self.nodeMap[c].neighbours[layer] :
-                    if e_id not in visited:
+                    if e_id not in visited.keys():
                         visited[e_id] = None
                         f: str = self.__get_vector_by_distance__ (neighbours, q, 'furthest')
                         if self.distance(e_id, q) < self.distance(f, q) or len(neighbours) < ef :
                             candidates[e_id] = None
                             neighbours[e_id] = None
-                            if len(neighbours) > ef :
+                            if len(neighbours.keys()) > ef :
                                 f: str = self.__get_vector_by_distance__ (neighbours, q, 'furthest')
                                 del neighbours[f]
                 if self.distance(c, q) < self.distance (f, q) :
@@ -433,12 +440,11 @@ class HNSW :
                 self.total_nodes += 1
                 return 
             
-            
             ep: str = self.entry_point_id
             L: int = self.nodeMap[ep].max_level
             l: int = self.__generate_level__(ml, self.max_level)
             
-            new_node_id: str = self.__insert_node_into_map__(Node(q, l))
+            new_node_id: str = self.__insert_node_into_map__(Node(q, l)) 
             
             for l_c in range(L, l - 1, -1):
                 W: dict[str, None] = self.__search_layer__(q, ep, 1, l_c)
@@ -453,11 +459,11 @@ class HNSW :
                 self.entry_point_id = new_node_id
             
             self.total_nodes += 1
-        
+            
         except Exception as error:
             raise InsertionError(str(error))
     
-    def Search (self, q: Vector, K: int, efsearch: int) -> list[Vector]:
+    def Search (self, q: Vector, K: int, efsearch: int) -> list[tuple[float, Vector]]:
         """
         Perform approximate nearest neighbor search for a given query vector.
         
@@ -470,6 +476,9 @@ class HNSW :
             list[Vector]: A list of vectors representing the closest neighbors, sorted by similarity.
         """
         try:
+            
+            if K > efsearch:
+                raise Exception('efsearch must be greater then or equal to K')
             
             if not self.entry_point_id :
                 raise Exception('No entry point determined! Insert a point first')
@@ -485,26 +494,44 @@ class HNSW :
                 ep: str = self.__get_vector_by_distance__(W, q, 'nearest')
             
             nearest_ids: dict[str, None] = self.__search_layer__(q, ep, efsearch, 0)
-            sorted_vectors: list[Vector] = [
-                self.nodeMap[id].vector for id in sorted(
-                    nearest_ids.keys(), 
-                    key=lambda id: self.distance(id, q), 
-                    reverse=True
-                )
-            ]
+            vec_dist_tuple: list[tuple[float, Vector]] = [(
+                    float(self.distance(id, q)), 
+                    self.nodeMap[id].vector
+                ) for id in nearest_ids.keys()]
             
-            return sorted_vectors if len(sorted_vectors) < K else sorted_vectors[:K]
+            sorted_vecs = sorted(vec_dist_tuple, key=lambda x: x[0], reverse=True)
+            
+            # sorted_vectors: list[Vector] = [
+            #     self.nodeMap[id].vector for id in sorted(
+            #         nearest_ids.keys(), 
+            #         key=lambda id: self.distance(id, q), 
+            #         reverse=True
+            #     )
+            # ]
+            
+            return sorted_vecs if len(sorted_vecs) < K else sorted_vecs[:K]
         
         except Exception as error:
             raise SearchError(str(error))
 
     def Save (self, path: str = 'hnswindex.pkl') -> None:
+        """
+        Saves the state of this index in a .pkl file
+        
+        Args:
+            path (str): The path where the state must be stored
+        """
         with open(path, 'wb') as f:
             pickle.dump(self, f)
     
     @classmethod
     def Load (cls, path: str) -> None:
+        """
+        Loads the state of the HNSW index stored
         
+        Args:
+            path (str): The path where the state is stored
+        """
         try:
             with open(path, "rb") as f:
                 return pickle.load(f)
