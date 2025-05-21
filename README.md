@@ -1,4 +1,4 @@
-# HNLX 
+# Hnlx
 
 This is a python library for the implementation of the HNSW graph, utilising the MLX array framework (for Apple silicon). This library is currently unfinished. A list of future features and to-dos is given below for further reference. The main goal is to keep improving this index in accordance with latest research (and adding more vector indexes) with focus on making them performant on apple silicon using mlx.
 

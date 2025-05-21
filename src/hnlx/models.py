@@ -1,8 +1,24 @@
+import functools
+import time
 import mlx.core as mx
 from typing import Literal
+from pydantic import BaseModel
 
 type Vector = mx.array
 type distance = Literal['Cosine', 'Hamming', 'Jaccard', 'Eucilidean', 'Inner', 'Manhattan']
+
+class TestConfig (BaseModel):
+    M: int
+    K: int
+    efsearch: int
+    num_vectors: int
+    efconstruction: int
+    vec_dimensions: int
+
+class Report (BaseModel):
+    precision: float
+    search_time: float
+    construction_time: float
 
 class NodeNotFoundError(Exception):
     """Raised when a node ID is not found in the node map."""
@@ -78,3 +94,16 @@ class SearchError (Exception):
     """Raise while performing K-NN search over the index"""
     def __init__(self, message: str) -> None:
         super().__init__(f"Error while search the vector over the index: {message}")
+
+# def store_execution_time(attribute_name='_execution_time'):
+#     def decorator(func):
+#         @functools.wraps(func)
+#         def wrapper(self, *args, **kwargs):
+#             start_time = time.perf_counter()
+#             result = func(self, *args, **kwargs)
+#             end_time = time.perf_counter()
+#             elapsed_time = end_time - start_time
+#             setattr(self, attribute_name, elapsed_time)
+#             return result
+#         return wrapper
+#     return decorator

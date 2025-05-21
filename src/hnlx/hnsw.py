@@ -1,7 +1,8 @@
+import json
 import uuid
 import math
-import pickle
 import random
+import datetime
 import mlx.nn as nn
 from .models import *
 import mlx.core as mx
@@ -56,6 +57,15 @@ class HNSW :
         self.max_level: int = max_level
         self.nodeMap: dict[str, Node] = {}
         self.entry_point_id: Optional[str] = None
+        self.timeMap: dict[str, list[float]] = {
+            'bidirectional connection': list(),
+            'search layer': list(),
+            'insert': list(),
+            'search': list(),
+            'cosine distance': list(),
+            'vector distance': list(),
+            'search neighbours': list()
+        }
         
         if dist == 'Manhattan':
             self.distance: Callable[[str, Vector], float] = self.__manhattan__
@@ -133,12 +143,16 @@ class HNSW :
             float: Cosine similarity score.
         """
         try:
-            
+            start = datetime.datetime.now()
             node = self.__get_node_from_map__(nodeID)
-            return float(nn.losses.cosine_similarity_loss(
+            cos_sim = float(nn.losses.cosine_similarity_loss(
                 mx.expand_dims(node.vector, axis=1).T, 
                 mx.expand_dims(q, axis=1).T)
             )
+            duration = datetime.datetime.now() - start
+            self.timeMap['cosine distance'].append(duration.total_seconds())
+            
+            return cos_sim
             
         except NodeNotFoundError as e:
             raise e
@@ -278,12 +292,7 @@ class HNSW :
         except Exception as error:
             raise NodeInsertionError(str(error))
     
-    def __get_vector_by_distance__ (
-        self, 
-        vecIDs: dict[str, None], 
-        q: Vector, 
-        dist: Literal['nearest', 'furthest']
-    ) -> str :
+    def __get_vector_by_distance__ (self, vecIDs: dict[str, None], q: Vector, dist: Literal['nearest', 'furthest']) -> str :
         """
         Find a vector from a set that is closest or farthest to the query.
 
@@ -295,7 +304,8 @@ class HNSW :
         Returns:
             str: ID of the selected vector.
         """
-        try:            
+        try:    
+            start = datetime.datetime.now()        
             matrix = mx.stack(
                 list(
                     map(
@@ -329,6 +339,9 @@ class HNSW :
                 dists: Vector = nn.losses.cosine_similarity_loss(matrix, mx.expand_dims(q, axis=1).T)
                 
             idx = int(mx.argmax(dists)) if dist == 'nearest' else int(mx.argmin(dists))
+            duration = datetime.datetime.now() - start
+            self.timeMap['vector distance'].append(duration.total_seconds())
+            
             return list(vecIDs.keys())[idx]
         
         except KeyError as error:
@@ -350,8 +363,12 @@ class HNSW :
             dict[str, None]: Selected neighbor IDs.
         """
         try:
+            start = datetime.datetime.now()
             id_dist_map: dict[str, float] = {id: self.distance(id, point) for id in ids.keys()}
             sorted_keys: list[str] = sorted(id_dist_map.keys(), key=lambda k: id_dist_map[k], reverse=True)[:M]
+            duration = datetime.datetime.now() - start
+            self.timeMap['search neighbours'].append(duration.total_seconds())
+            
             return {k: None for k in sorted_keys}
         
         except Exception as error:
@@ -368,6 +385,7 @@ class HNSW :
             layer (int): Layer index.
         """
         try:
+            start = datetime.datetime.now()
             for node1 in nodes.keys() :
                 self.nodeMap[node1].neighbours[layer][node] = None
                 self.nodeMap[node].neighbours[layer][node1] = None
@@ -382,6 +400,8 @@ class HNSW :
                     self.nodeMap[node].neighbours[layer], 
                     M
                 )
+            duration = datetime.datetime.now() - start
+            self.timeMap['bidirectional connection'].append(duration.total_seconds())
             
         except Exception as error:
             raise BidirectionalConnectionError(str(error))
@@ -400,6 +420,7 @@ class HNSW :
             dict[str, None]: Found neighbor IDs.
         """
         try:
+            start = datetime.datetime.now()
             visited: dict[str, None] = {ep: None}
             candidates: dict[str, None] = {ep: None}
             neighbours: dict[str, None] = {ep: None}
@@ -419,6 +440,8 @@ class HNSW :
                 if self.distance(c, q) < self.distance (f, q) :
                     break
                 del candidates[c]
+            duration = datetime.datetime.now() - start
+            self.timeMap['search layer'].append(duration.total_seconds())
             return neighbours
         
         except Exception as error:
@@ -432,6 +455,7 @@ class HNSW :
             q (Vector): The vector to insert.
         """
         try:
+            start = datetime.datetime.now()
             ml = 1 / (-math.log(1 - (1 / self.M)))
             
             if self.entry_point_id is None:
@@ -459,6 +483,10 @@ class HNSW :
                 self.entry_point_id = new_node_id
             
             self.total_nodes += 1
+            duration = datetime.datetime.now() - start
+            
+            self.timeMap['insert'].append(duration.total_seconds())
+            
             
         except Exception as error:
             raise InsertionError(str(error))
@@ -476,7 +504,7 @@ class HNSW :
             list[Vector]: A list of vectors representing the closest neighbors, sorted by similarity.
         """
         try:
-            
+            start = datetime.datetime.now()
             if K > efsearch:
                 raise Exception('efsearch must be greater then or equal to K')
             
@@ -500,43 +528,15 @@ class HNSW :
                 ) for id in nearest_ids.keys()]
             
             sorted_vecs = sorted(vec_dist_tuple, key=lambda x: x[0], reverse=True)
-            
-            # sorted_vectors: list[Vector] = [
-            #     self.nodeMap[id].vector for id in sorted(
-            #         nearest_ids.keys(), 
-            #         key=lambda id: self.distance(id, q), 
-            #         reverse=True
-            #     )
-            # ]
+            duration = datetime.datetime.now() - start
+            self.timeMap['search'].append(duration.total_seconds())
             
             return sorted_vecs if len(sorted_vecs) < K else sorted_vecs[:K]
         
         except Exception as error:
             raise SearchError(str(error))
 
-    def Save (self, path: str = 'hnswindex.pkl') -> None:
-        """
-        Saves the state of this index in a .pkl file
-        
-        Args:
-            path (str): The path where the state must be stored
-        """
-        with open(path, 'wb') as f:
-            pickle.dump(self, f)
-    
-    @classmethod
-    def Load (cls, path: str) -> None:
-        """
-        Loads the state of the HNSW index stored
-        
-        Args:
-            path (str): The path where the state is stored
-        """
-        try:
-            with open(path, "rb") as f:
-                return pickle.load(f)
-        
-        except Exception as error:
-            raise Exception(error)
-    
+    def TimeReport (self) -> None:
+        avg: dict[str, float] = {k: round(sum(self.timeMap[k]) / len(self.timeMap[k]), 4) for k in self.timeMap.keys()}
+        print(json.dumps(avg, indent=2))
     
