@@ -1,5 +1,3 @@
-import functools
-import time
 import mlx.core as mx
 from typing import Literal
 from pydantic import BaseModel

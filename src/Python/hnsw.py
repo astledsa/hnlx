@@ -478,6 +478,7 @@ class HNSW :
                 W: dict[str, None] = self.__search_layer__(q, ep, self.efconstruction, l_c)
                 neighbours: dict[str, None] = self.__select_neighbours__(q, W, self.M) 
                 self.__bidirectional_connection__(neighbours, new_node_id, self.M, l_c)
+                ep: str = self.__get_vector_by_distance__(W, q, 'nearest')
             
             if l > L :
                 self.entry_point_id = new_node_id
@@ -537,6 +538,9 @@ class HNSW :
             raise SearchError(str(error))
 
     def TimeReport (self) -> None:
+        """
+        Print a report of average times for various operations in the HNSW graph.
+        """
         avg: dict[str, float] = {k: round(sum(self.timeMap[k]) / len(self.timeMap[k]), 4) for k in self.timeMap.keys()}
         print(json.dumps(avg, indent=2))
     

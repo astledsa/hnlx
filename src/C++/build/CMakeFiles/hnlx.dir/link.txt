@@ -1,0 +1,2 @@
+/usr/bin/ar qc libhnlx.a CMakeFiles/hnlx.dir/hnlx.cpp.o
+/usr/bin/ranlib libhnlx.a

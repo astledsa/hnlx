@@ -1,5 +1,5 @@
 [project]
-name = "umlx"
+name = "hnlx"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -8,8 +8,11 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "hnswlib>=0.8.0",
     "mlx>=0.23.1",
+    "numpy>=2.2.6",
     "pydantic>=2.11.4",
+    "torch>=2.7.0",
 ]
 
 [build-system]
