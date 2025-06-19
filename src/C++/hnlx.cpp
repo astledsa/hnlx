@@ -190,4 +190,20 @@ void HNSW::Insert(const Vector& q) {
     this->total_nodes += 1;
 };
 
-// std::vector<Vector> HNSW::Search (const Vector& q, int8_t K, int8_t efsearch) {};
+// std::vector<Vector> HNSW::Search (const Vector& q, int K, int efsearch) {
+//     assert(K <= efsearch);
+//     assert(this->Ep != std::nullopt);
+//     assert (std::find(this->NodeMap.begin(), this->NodeMap.end(), this->Ep) != this->NodeMap.end());
+
+//     size_t ep = this->Ep.value();
+//     int L = this->NodeMap[ep].max_level;
+
+//     for (int l_c = L; l_c >= 1; --l_c) {
+//         UniqueVector<size_t> W = this->search_layer(q, ep, efsearch, l_c);
+//         ep = this->get_node_by_distance(W.data, q, Dist::nearest);
+//     }
+
+//     UniqueVector<size_t> nearest_ids = this->search_layer(q, ep, efsearch, 0);
+//     std::vector<std::tuple<float, Vector>> vec_dist_tuple;
+
+// };

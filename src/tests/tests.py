@@ -29,10 +29,10 @@ def BruteForceTest (values: TestConfig) -> Report:
     num_vectors: int = values.num_vectors
     dimensions: int = values.vec_dimensions
     
-    index: HNSW = HNSW(values.M, values.efconstruction, 4)
+    index: HNSW = HNSW(values.M, values.efconstruction, 4, pruning=values.Prune, threshold=values.Batch_Threshold)
     random_vectors: list[Vector] = [
         mx.random.normal(shape=(dimensions,)) for _ in range(num_vectors)
-    ]
+    ]  
     
     start = datetime.datetime.now()
     for i in range(num_vectors):
@@ -50,7 +50,7 @@ def BruteForceTest (values: TestConfig) -> Report:
     search_duration = end - start
     precision: float = Precision(bruteResults, knnResults)
     index.TimeReport()
-    
+
     return Report(
                 precision=precision, 
                 search_time=search_duration.total_seconds(), 
@@ -107,9 +107,13 @@ def ComparisonTest(values: TestConfig) -> Report:
 
 config1 = TestConfig(
     M=16,             
-    K=10,             
-    efsearch=100,     
-    num_vectors=50, 
+    K=5,             
+    efsearch=1000,     
+    num_vectors=100, 
     efconstruction=200, 
-    vec_dimensions=128
+    vec_dimensions=128,
+    Prune=False,
+    Batch_Threshold=100
 )
+
+print(BruteForceTest(config1).model_dump_json(indent=2))

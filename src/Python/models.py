@@ -12,6 +12,8 @@ class TestConfig (BaseModel):
     num_vectors: int
     efconstruction: int
     vec_dimensions: int
+    Prune: bool
+    Batch_Threshold: int
 
 class Report (BaseModel):
     precision: float
