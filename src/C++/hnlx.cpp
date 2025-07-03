@@ -1,4 +1,5 @@
 #include <cmath>
+#include <random>
 #include "hnlx.h" 
 #include <cassert>
 #include <cstdlib>
@@ -6,7 +7,6 @@
 #include <iostream>
 #include "mlx/mlx.h"
 #include <algorithm>
-#include <random>
 
 namespace mx = mlx::core;
 
@@ -22,7 +22,7 @@ void PrintShape (Vector v) {
     std::cout << "(" << v.shape(0) << "," << v.shape(1) << ")" << std::endl;
 }
 
-mx::array cosine_sim (const Vector& v1, const Vector& v2) {
+Vector cosine_sim (const Vector& v1, const Vector& v2) {
     mx::array q = v1; 
     mx::array v = mx::transpose(v2);
 
@@ -34,8 +34,8 @@ mx::array cosine_sim (const Vector& v1, const Vector& v2) {
     return  dot_product / denominator;;
 }
 
-HNSW::HNSW (int M, int ef_construction) :
-    M(M), ef_construction(ef_construction), total_nodes(0), Ep(std::nullopt) {}
+HNSW::HNSW (int M, int ef_construction, int threshold) :
+    M(M), ef_construction(ef_construction), total_nodes(0), Ep(std::nullopt), threshold(threshold) {}
 
 Node::Node (Vector v, int max_level) :
     vector(v), max_level(max_level) {
@@ -46,8 +46,17 @@ Node::Node (Vector v, int max_level) :
 
 float HNSW::cosine_similarity(size_t id, const Vector& q) {
     const Node& node = this->NodeMap[id];
-    mx::array c =  cosine_sim (node.vector, q);
+    Vector c =  cosine_sim (node.vector, q);
     return c.item<float>();
+}
+
+bool HNSW::search_layer_break_condition (size_t c, size_t f, std::vector<Vector> q) {
+    Vector cv = this->NodeMap[c].vector;
+    Vector fv = this->NodeMap[f].vector;
+    Vector qv = mx::stack(q);
+    Vector cv_qv = cosine_sim(mx::transpose(mx::expand_dims(cv, 1)), qv);
+    Vector fv_qv = cosine_sim(mx::transpose(mx::expand_dims(fv, 1)), qv);
+    return mx::all(cv_qv < fv_qv).item<bool>();
 }
 
 int HNSW::generate_level(float ml, int max_level) {
@@ -56,6 +65,48 @@ int HNSW::generate_level(float ml, int max_level) {
     float val = -std::log(r) * ml;
     int level = static_cast<int>(val);
     return std::min(level, max_level);
+}
+
+std::vector<UniqueVector<size_t>> HNSW::select_neighbours_batch(
+    std::vector<Vector> points, 
+    std::vector<std::vector<size_t>> ids, 
+    int M
+) {
+    if (ids.empty()) { return {}; }
+    std::vector<std::vector<size_t>> ks = ids;
+    int B = static_cast<int>(ks.size());
+    int d = static_cast<int>(this->NodeMap[ks[0][0]].vector.shape(0));
+    int L = 0;
+    for (const auto& inner_list : ks) {
+        L = std::max(L, static_cast<int>(inner_list.size()));
+    }
+    Vector X = mx::zeros(mx::Shape{B, L, d});
+    Vector mask = mx::zeros(mx::Shape{B, L});
+    for (int i = 0; i < ks.size(); i++) {
+        std::vector<Vector> e_list;
+        e_list.reserve(ks[i].size());
+        std::transform(ks[i].begin(), ks[i].end(), std::back_inserter(e_list), [this](size_t id) {
+            return this->NodeMap[id].vector;
+        });
+        Vector e = mx::stack(e_list);
+        int n = static_cast<int>(e.shape(0));
+        X = mx::slice_update(
+            X,
+            e,
+            {i, 0},
+            {i+1, n}
+        );
+        mask = mx::slice_update(
+            mask, 
+            mx::ones(mx::Shape{1, n}), 
+            {i, 0},
+            {i+1, n}
+        );
+    }
+    Vector V = mx::stack(points);
+    X = X / mx::linalg::norm(X, 1, true);
+    V = V / mx::linalg::norm(V, 1, true);
+    
 }
 
 std::vector<size_t> HNSW::select_neighbours(const Vector& q, std::vector<size_t> ids, int M) {
@@ -72,7 +123,7 @@ std::vector<size_t> HNSW::select_neighbours(const Vector& q, std::vector<size_t>
     return sorted;
 }
 
-size_t HNSW::get_node_by_distance(const std::vector<size_t>& nodes, const Vector& q, Dist dist) {
+size_t HNSW::get_node_by_distance(const std::vector<size_t>& nodes, std::vector<Vector> q, Dist dist) {
 
     assert(!nodes.empty());
     std::vector<Vector> vecs;
@@ -90,13 +141,13 @@ size_t HNSW::get_node_by_distance(const std::vector<size_t>& nodes, const Vector
     assert(matrix.ndim() == 2);
 
     size_t idx;
-    Vector dists = cosine_sim(matrix, mx::transpose(mx::expand_dims(q, 1)));
+    Vector dists = cosine_sim(matrix, mx::transpose(mx::stack(q)));
     switch (dist) {
         case Dist::nearest:
-            idx = mx::argmax(dists).item<size_t>();
+            idx = mx::argmax(mx::argmax(dists, 1)).item<size_t>();
             break;   
         case Dist::farthest:
-            idx = mx::argmin(dists).item<size_t>();
+            idx = mx::argmin(mx::argmin(dists, 1)).item<size_t>();
             break;
     };
 
@@ -104,7 +155,7 @@ size_t HNSW::get_node_by_distance(const std::vector<size_t>& nodes, const Vector
     return nodes[idx];
 }
 
-UniqueVector<size_t> HNSW::search_layer(const Vector& q, size_t ep, int ef, int layer) {
+UniqueVector<size_t> HNSW::search_layer(std::vector<Vector> q, size_t ep, int ef, int layer) {
 
     UniqueVector<size_t> visited(ep);
     UniqueVector<size_t> candidates(ep);
@@ -114,7 +165,7 @@ UniqueVector<size_t> HNSW::search_layer(const Vector& q, size_t ep, int ef, int 
         size_t c = this->get_node_by_distance(candidates.data, q, Dist::nearest);
         size_t f = this->get_node_by_distance(neighbours.data, q, Dist::farthest);
 
-        if (this->cosine_similarity(c, q) < this->cosine_similarity(f, q)) {
+        if (this->search_layer_break_condition(c, f, q)) {
             break;
         }
 
@@ -122,7 +173,7 @@ UniqueVector<size_t> HNSW::search_layer(const Vector& q, size_t ep, int ef, int 
             if (!visited.contains(e_id)) {
                 visited.insert(e_id);
                 size_t f = this->get_node_by_distance(neighbours.data, q, Dist::farthest);
-                if (this->cosine_similarity(e_id, q) < this->cosine_similarity(f, q) || neighbours.size() < ef) {
+                if (this->search_layer_break_condition(e_id, f, q) || neighbours.size() < ef) {
                     candidates.insert(e_id);
                     neighbours.insert(e_id);
                     if (neighbours.size() > ef) {
@@ -164,30 +215,36 @@ void HNSW::Insert(const Vector& q) {
         int node_level = this->generate_level(ml, this->max_level);
         this->NodeMap.push_back(Node (q, node_level));
         this->Ep = this->NodeMap.size() - 1;
+        this->cache.Insert(this->Ep.value(), q, node_level);
         this->total_nodes += 1;
         return;
     }
 
     size_t ep = this->Ep.value();
-    int L = this->max_level;
     int l = this->generate_level(ml, this->max_level);
     this->NodeMap.push_back(Node(q, l));
     size_t new_node_id = this->NodeMap.size() - 1;
+    this->cache.Insert(new_node_id, q, l);
 
-    for (int l_c = L; l_c >= l; --l_c) {
-        UniqueVector<size_t> W = this->search_layer(q, ep, 1, l_c);
-        ep = this->get_node_by_distance(W.data, q, Dist::nearest);
+    if (this->cache.Data.size() == this->threshold) {
+        int max_lvl = this->cache.get_max_level();
+        for (int l_c = max_lvl; l_c >= 0; --l_c) {
+            std::vector<Vector> batch_vector = this->cache.get_vectors(l_c);
+            UniqueVector<size_t> W = this->search_layer(batch_vector, ep, 1, l_c);
+            ep = this->get_node_by_distance(W.data, batch_vector, Dist::nearest);
+        }
+
+        for (int l_c = max_lvl; l_c >= 0; --l_c) {
+            std::vector<size_t> batch_ids = this->cache.get_ids(l_c);
+            std::vector<Vector> batch_vectors = this->cache.get_vectors(l_c);
+            UniqueVector<size_t> W = this->search_layer(batch_vectors, ep, this->ef_construction, l_c);
+            std::vector<size_t> neighbours = this->select_neighbours(q, W.data, this->M);
+            this->bidirectional_connection(neighbours, new_node_id, this->M, l_c);
+            ep = this->get_node_by_distance(W.data, batch_vectors, Dist::nearest);
+        }
+
+        this->total_nodes += 1;
     }
-
-    for (int l_c = std::min(L, l); l_c >= 0; --l_c) {
-        UniqueVector<size_t> W = this->search_layer(q, ep, this->ef_construction, l_c);
-        std::vector<size_t> neighbours = this->select_neighbours(q, W.data, this->M);
-        this->bidirectional_connection(neighbours, new_node_id, this->M, l_c);
-        ep = this->get_node_by_distance(W.data, q, Dist::nearest);
-    }
-
-    if (l > L) { this->Ep = new_node_id; }
-    this->total_nodes += 1;
 };
 
 // std::vector<Vector> HNSW::Search (const Vector& q, int K, int efsearch) {

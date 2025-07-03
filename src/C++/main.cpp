@@ -24,7 +24,7 @@ int main() {
     }
 
     std::cout << "Vector creation complete.\n\n";
-    HNSW hnsw(16, 200);
+    HNSW hnsw(16, 200, 200);
     std::cout << "Starting insertion of " << N << " vectors into HNSW index...\n";
 
     auto start_time = std::chrono::high_resolution_clock::now();
