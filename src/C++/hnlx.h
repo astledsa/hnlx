@@ -15,11 +15,34 @@ using Vector = mx::array;
 enum class Dist { nearest, farthest };
 
 template <typename T>
+T get_index (const Vector& array, int i, int j) {
+    if (m.ndim() != 2) {
+        throw std::invalid_argument(
+            "[get_index] Input array must be 2-dimensional (a matrix).");
+    }
+
+    if (i < 0 || i >= m.shape(0) || j < 0 || j >= m.shape(1)) {
+        throw std::out_of_range(
+            "[get_index] Index (" + std::to_string(i) + ", " + 
+            std::to_string(j) + ") is out of bounds for array with shape (" +
+            std::to_string(m.shape(0)) + ", " + std::to_string(m.shape(1)) + ").");
+    }
+
+    auto start_indices = {i, j};
+    auto end_indices = {i + 1, j + 1};
+    auto element_slice = mx::slice(m, start_indices, end_indices);
+
+    return element_slice.item<T>();
+}
+
+template <typename T>
 class UniqueVector {
     private:
         std::unordered_set<T> unique;
     public:
         std::vector<T> data;
+        UniqueVector() {};
+        
         explicit UniqueVector (const T& val) {
             insert(val);
         }
@@ -46,6 +69,8 @@ class UniqueVector {
 class Cache {
     public:
         std::vector<std::tuple<int, size_t, Vector>> Data;
+
+        Cache() {};
         
         void Insert (size_t id, Vector q, int lvl) { 
             Data.push_back(std::make_tuple(lvl, id, q)); 
@@ -79,6 +104,16 @@ class Cache {
             });
             return std::get<0>(*max_ID);
         }
+
+        size_t get_entry_id () {
+            int max_lvl = get_max_level();
+            for (const std::tuple<int, size_t, Vector>& tup: Data) {
+                if (std::get<0>(tup) == max_lvl) {
+                    return std::get<1>(tup);
+                }
+            }
+            throw std::logic_error("No max ID found.");
+        }
 };
 
 class Node {
@@ -92,6 +127,7 @@ class Node {
 class HNSW {
     public:
         float M;
+        bool pruning;
         int threshold;
         int max_level;
         int total_nodes;

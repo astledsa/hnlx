@@ -34,8 +34,16 @@ Vector cosine_sim (const Vector& v1, const Vector& v2) {
     return  dot_product / denominator;;
 }
 
+Vector get_slice (int index, const Vector& v) {
+    auto start_indices = {index, 0};
+    auto end_indices = {index + 1, v.shape(1)};
+    auto inner_array_slice = mx::slice(v, start_indices, end_indices);
+
+    return mx::squeeze(inner_array_slice, 0);
+}
+
 HNSW::HNSW (int M, int ef_construction, int threshold) :
-    M(M), ef_construction(ef_construction), total_nodes(0), Ep(std::nullopt), threshold(threshold) {}
+    M(M), pruning(false), ef_construction(ef_construction), total_nodes(0), Ep(std::nullopt), threshold(threshold) {}
 
 Node::Node (Vector v, int max_level) :
     vector(v), max_level(max_level) {
@@ -104,9 +112,26 @@ std::vector<UniqueVector<size_t>> HNSW::select_neighbours_batch(
         );
     }
     Vector V = mx::stack(points);
-    X = X / mx::linalg::norm(X, 1, true);
-    V = V / mx::linalg::norm(V, 1, true);
-    
+    X = X / mx::linalg::norm(X, -1, true);
+    V = V / mx::linalg::norm(V, -1, true);
+    Vector S = mx::sum(X * mx::expand_dims(V, 1), -1) + (mask - 1) * 1e9;
+    Vector top = mx::argsort(-S, 1);
+
+    assert(M < top.shape(1));
+    assert(ks.size() == static_cast<size_t>(top.shape(0)));
+    std::vector<UniqueVector<size_t>> neighbours = {};
+
+    for (int i = 0; i < ks.size(); i++) {
+        UniqueVector<size_t> current = {};
+        for (int j = 0; j < M; j++) {
+            size_t top_index_i_j = get_index<size_t>(top, i, j);
+            if (top_index_i_j < ks[i].size()) {
+                current.insert(top_index_i_j);
+            }
+        }
+        neighbours.push_back(current);
+    }
+    return neighbours;
 }
 
 std::vector<size_t> HNSW::select_neighbours(const Vector& q, std::vector<size_t> ids, int M) {
@@ -193,17 +218,11 @@ void HNSW::bidirectional_connection(std::vector<size_t> ids, size_t id, int M, i
     for (const size_t& n: ids) {
         this->NodeMap[n].Neighbours[layer].push_back(id);
         this->NodeMap[id].Neighbours[layer].push_back(n);
-        this->NodeMap[n].Neighbours[layer] = this->select_neighbours(
-            this->NodeMap[n].vector,
-            this->NodeMap[n].Neighbours[layer],
-            M
-        );
     };
-    this->NodeMap[id].Neighbours[layer] = this->select_neighbours(
-        this->NodeMap[id].vector,
-        this->NodeMap[id].Neighbours[layer],
-        M
-    );
+    
+    if (this->pruning) { 
+        // Implement Pruning logic here
+    };
 }
 
 void HNSW::Insert(const Vector& q) {
@@ -238,12 +257,29 @@ void HNSW::Insert(const Vector& q) {
             std::vector<size_t> batch_ids = this->cache.get_ids(l_c);
             std::vector<Vector> batch_vectors = this->cache.get_vectors(l_c);
             UniqueVector<size_t> W = this->search_layer(batch_vectors, ep, this->ef_construction, l_c);
-            std::vector<size_t> neighbours = this->select_neighbours(q, W.data, this->M);
-            this->bidirectional_connection(neighbours, new_node_id, this->M, l_c);
+            std::vector<std::vector<size_t>> copied_W (batch_vectors.size(), W.data);
+            std::vector<UniqueVector<size_t>> neighbours = this->select_neighbours_batch(
+                batch_vectors, 
+                copied_W, 
+                this->M
+            );
+
+            assert(neighbours.size() == batch_ids.size());
+            for (int i = 0; i < neighbours.size(); i++) {
+                this->bidirectional_connection(
+                    neighbours[i].data,
+                    batch_ids[i],
+                    this->M,
+                    l_c
+                );
+            };
+
             ep = this->get_node_by_distance(W.data, batch_vectors, Dist::nearest);
         }
 
+        this->Ep = this->cache.get_entry_id();
         this->total_nodes += 1;
+        this->cache.Data.clear();
     }
 };
 
