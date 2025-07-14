@@ -5,7 +5,7 @@ This is a python library for the implementation of the HNSW graph, utilising the
 ## Deliverable (v1.0)
 
 - [x] Multiple distance functions (Cosine, Inner, Manhattan, Hamming, Jaccard, Euclidean)
-- [ ] C++ Implementation with MLX C++
+- [x] C++ Implementation with MLX C++
 - [ ] ARM NEON Vector instructions (optional)
 - [ ] Improve the `search_neighbour` algorithm 
 - [ ] Python, Golang and Typescript bindings 
