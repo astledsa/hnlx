@@ -9,7 +9,6 @@ int main() {
 
     std::mt19937 gen(std::random_device{}());
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    std::cout << "Creating " << N << " random vectors of dimension " << D << "...\n";
 
     std::vector<Vector> all_vectors;
     all_vectors.reserve(N);
@@ -23,10 +22,9 @@ int main() {
         all_vectors.push_back(mx::array(data_vec.begin(), {D}, mx::float16));
     }
 
-    std::cout << "Vector creation complete.\n\n";
-    HNSW hnsw(16, 200, 200);
-    std::cout << "Starting insertion of " << N << " vectors into HNSW index...\n";
-
+    // (M, max level, threshold, efconstruction)
+    int batch = 50;
+    HNSW hnsw({16, 4, batch, 200});
     auto start_time = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < N; ++i) {
@@ -36,9 +34,11 @@ int main() {
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
 
+    std::cout << "\n";
     std::cout << "Insertion complete.\n";
-    std::cout << "Total insertion time for " << N << " vectors: " << static_cast<double>(duration.count())/1000000 << " seconds.\n";
+    std::cout << "Total insertion time for " << N << " vectors with batching " << batch << ": " << static_cast<double>(duration.count())/1000000 << " seconds.\n";
     std::cout << "\n" << std::endl;
+    hnsw.Report();
 
     return 0;
 }

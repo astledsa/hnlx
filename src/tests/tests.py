@@ -108,12 +108,12 @@ def ComparisonTest(values: TestConfig) -> Report:
 config1 = TestConfig(
     M=16,             
     K=5,             
-    efsearch=1000,     
+    efsearch=500,     
     num_vectors=100, 
     efconstruction=200, 
     vec_dimensions=128,
     Prune=False,
-    Batch_Threshold=100
+    Batch_Threshold=50
 )
 
 print(BruteForceTest(config1).model_dump_json(indent=2))

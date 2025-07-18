@@ -12,6 +12,7 @@ dependencies = [
     "mlx>=0.23.1",
     "numpy>=2.2.6",
     "pydantic>=2.11.4",
+    "snakeviz>=2.2.2",
     "torch>=2.7.0",
 ]
 

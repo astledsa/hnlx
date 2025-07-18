@@ -6,7 +6,7 @@ import datetime
 import mlx.nn as nn
 from .models import *
 import mlx.core as mx 
-from typing import Literal, Optional, Callable
+from typing import Literal, Optional, Callable, cast
 from collections.abc import Iterable
 
 class Node :
@@ -23,43 +23,29 @@ class Node :
         return bool(self.vector == other.vector)
                     
 class HNSW :
+    
     def __init__(self, M: int, efc: int, max_level: int, threshold:int, dist: distance = 'Cosine', pruning: bool = False) -> None:
         self.M: int = M
-        self.pruning = pruning
-        self.cache = list()
-        self.threshold = threshold
+        self.pruning: bool = pruning
+        self.cache: list[tuple[str, Vector, int]] = list()
+        self.threshold: int = threshold
         self.total_nodes: int = 0
         self.efconstruction: int = efc
         self.max_level: int = max_level
         self.nodeMap: dict[str, Node] = {}
         self.entry_point_id: Optional[str] = None
         self.timeMap: dict[str, list[float]] = {
-            'bidirectional connection': list(),
-            'search layer': list(),
-            'insert': list(),
+            'bidirectionalConn': list(),
+            'SearchLayer': list(),
+            'Insert': list(),
             'search': list(),
-            'cosine distance': list(),
-            'vector distance': list(),
-            'search neighbours': list()
+            'CosineDist': list(),
+            'GNBD': list(),
+            'SearchNeighbour': list()
         }
+            
         
-        if dist == 'Manhattan':
-            self.distance: Callable[[str, Vector], float] = self.__manhattan__
-            
-        elif dist == 'Eucilidean':
-            self.distance: Callable[[str, Vector], float] = self.__euclidean__
-            
-        elif dist == 'Hamming':
-            self.distance: Callable[[str, Vector], float] = self.__hamming__
-            
-        elif dist == 'Inner':
-            self.distance: Callable[[str, Vector], float] = self.__inner_product__
-            
-        elif dist == 'Jaccard':
-            self.distance: Callable[[str, Vector], float] = self.__jaccard__
-            
-        else:
-            self.distance: Callable[[str, Vector], float] = self.__cos_sim__
+        self.distance: Callable[[str, Vector], float] = self.__cos_sim__
     
     def __repr__(self) -> str:
         return f"""
@@ -94,7 +80,7 @@ class HNSW :
                 mx.expand_dims(q, axis=1).T)
             )
             duration = datetime.datetime.now() - start
-            self.timeMap['cosine distance'].append(duration.total_seconds())
+            self.timeMap['CosineDist'].append(duration.total_seconds())
             
             return cos_sim
             
@@ -104,78 +90,22 @@ class HNSW :
         except Exception as error:
             raise CosineSimilarityError(str(error))
     
-    def __search_layer_break_condition__ (self, c: str, f: str, q: list[Vector]) -> object :
+    def __search_layer_break_condition__ (self, c: str, f: str, q: list[Vector]) -> bool :
         cv: Vector = self.__get_node_from_map__(c).vector
         fv: Vector = self.__get_node_from_map__(f).vector
         qv: Vector = mx.stack(q)
         cv_qv = nn.losses.cosine_similarity_loss(mx.expand_dims(cv, axis=1).T, qv)
         fv_qv = nn.losses.cosine_similarity_loss(mx.expand_dims(fv, axis=1).T, qv)
-
-        return mx.all(cv_qv < fv_qv).item()
-    
-    def __euclidean__ (self, nodeID: str, q: Vector) -> float:
-        try:
-            
-            node = self.__get_node_from_map__(nodeID)
-            return float(mx.sqrt(mx.sum((node.vector - q) ** 2)))
-            
-        except NodeNotFoundError as e:
-            raise e
         
-        except Exception as error:
-            raise EuclideanDistanceError(str(error))
-    
-    def __manhattan__ (self, nodeID: str, q: Vector) -> float:
-        try:
-            
-            node = self.__get_node_from_map__(nodeID)
-            return float(mx.sum(mx.abs(node.vector -q)))
-            
-        except NodeNotFoundError as e:
-            raise e
+        # value = cast(float, mx.mean(cv_qv < fv_qv).item())
+        # return value > 0.5
         
-        except Exception as error:
-            raise ManhattanDistanceError(str(error))
-    
-    def __inner_product__ (self, nodeID: str, q: Vector) -> float:
-        try:
-            
-            node = self.__get_node_from_map__(nodeID)
-            return float(mx.sum(node.vector * q))
-            
-        except NodeNotFoundError as e:
-            raise e
+        # return cast(bool, mx.all(cv_qv < fv_qv).item())
         
-        except Exception as error:
-            raise InnerProductError(str(error))
-    
-    def __hamming__ (self, nodeID: str, q: Vector) -> float:
-        try:
-            
-            node = self.__get_node_from_map__(nodeID)
-            return float(mx.sum(mx.array((node.vector != q)).astype(mx.float16)))
-            
-        except NodeNotFoundError as e:
-            raise e
+        c_float = cast(float, mx.mean(cv_qv).item())
+        f_float = cast(float, mx.mean(fv_qv).item())
         
-        except Exception as error:
-            raise HammingDistanceError(str(error))
-    
-    def __jaccard__ (self, nodeID: str, q: Vector) -> float:
-        try:
-            
-            node = self.__get_node_from_map__(nodeID)
-            intersection = mx.sum(mx.logical_and(node.vector, q))
-            union = mx.sum(mx.logical_or(node.vector, q))
-            jaccard_similarity = intersection / union
-            jaccard_distance = 1.0 - jaccard_similarity
-            return float(jaccard_distance)
-            
-        except NodeNotFoundError as e:
-            raise e
-        
-        except Exception as error:
-            raise JaccardDistanceError(str(error))
+        return c_float < f_float
     
     def __insert_node_into_map__ (self, node: Node) -> str :
         try:
@@ -188,10 +118,10 @@ class HNSW :
     
     def __get_vector_by_distance__ (self, vecIDs: dict[str, None], q: list[Vector], dist: Literal['nearest', 'furthest']) -> str :
         try:
-            if len(list(vecIDs.keys())) == 1:
-                return list(vecIDs.keys())[0]
-             
-            start = datetime.datetime.now()        
+            # if len(list(vecIDs.keys())) == 1:
+            #     return list(vecIDs.keys())[0]
+            start = datetime.datetime.now()      
+              
             matrix = mx.stack(
                 list(
                     map(
@@ -204,8 +134,7 @@ class HNSW :
             dists: Vector = mx.matmul(matrix, mx.stack(q).T) / mx.maximum(mx.expand_dims(mx.linalg.norm(matrix, axis=1), axis=1) * mx.expand_dims(mx.linalg.norm(mx.stack(q), axis=1), axis=0), 1e-8)
             idx = int(mx.argmax(mx.argmax(dists, axis=1))) if dist == 'nearest' else int(mx.argmin(mx.argmin(dists, axis=1)))
             duration = datetime.datetime.now() - start
-            self.timeMap['vector distance'].append(duration.total_seconds())
-
+            self.timeMap['GNBD'].append(duration.total_seconds())
             assert(len(list(vecIDs.keys())) > idx)
             return list(vecIDs.keys())[idx]
         
@@ -217,11 +146,11 @@ class HNSW :
     
     def __select_neighbours__ (self, point: Vector, ids: dict[str, None], M: int) -> dict[str, None]:
         try:
-            start = datetime.datetime.now()
+            # start = datetime.datetime.now()
             id_dist_map: dict[str, float] = {id: self.distance(id, point) for id in ids.keys()}
             sorted_keys: list[str] = sorted(id_dist_map.keys(), key=lambda k: id_dist_map[k], reverse=True)[:M]
-            duration = datetime.datetime.now() - start
-            self.timeMap['search neighbours'].append(duration.total_seconds())
+            # duration = datetime.datetime.now() - start
+            # self.timeMap['search neighbours'].append(duration.total_seconds())
             
             return {k: None for k in sorted_keys}
         
@@ -230,6 +159,7 @@ class HNSW :
     
     def __select_neighbours_batch__(self, points: list[Vector], ids: list[list[str]], M: int) -> Optional[list[dict[str, None]]]:
         
+        start = datetime.datetime.now()
         ks = [list(g) for g in ids]
         B,L,d = len(ks),max(map(len,ks)), self.__get_node_from_map__(ks[0][0]).vector.shape[0]
         X,mask = mx.zeros((B,L,d)),mx.zeros((B,L))
@@ -242,9 +172,12 @@ class HNSW :
         S = mx.sum(X*V[:,None,:],axis=-1)+(mask-1)*1e9
         top = mx.argsort(-S,axis=1)[:,:M].tolist()
         if isinstance(top, Iterable):
-            return [{g[j]: None for j in idx if j < len(g)}
+            duration = datetime.datetime.now() - start
+            self.timeMap['SearchNeighbour'].append(duration.total_seconds())
+            dict_list = [{g[j]: None for j in idx if j < len(g)}
                     for g, idx in zip(ks, top)
                 ]
+            return dict_list
         else:
             return None
 
@@ -282,13 +215,14 @@ class HNSW :
                 )
         
             duration = datetime.datetime.now() - start
-            self.timeMap['bidirectional connection'].append(duration.total_seconds())
+            self.timeMap['bidirectionalConn'].append(duration.total_seconds())
             
         except Exception as error:
             raise BidirectionalConnectionError(str(error))
              
     def __search_layer__ (self, q: list[Vector], ep: str, ef: int, layer: int) -> dict[str, None] :
         try:
+            # print("Entered")
             start = datetime.datetime.now()
             visited: dict[str, None] = {ep: None}
             candidates: dict[str, None] = {ep: None}
@@ -301,16 +235,19 @@ class HNSW :
                         visited[e_id] = None
                         f: str = self.__get_vector_by_distance__ (neighbours, q, 'furthest')
                         if self.__search_layer_break_condition__(e_id, f, q) or len(neighbours) < ef :
+                            # print("Triggered here")
                             candidates[e_id] = None
                             neighbours[e_id] = None
                             if len(neighbours.keys()) > ef :
                                 f: str = self.__get_vector_by_distance__ (neighbours, q, 'furthest')
                                 del neighbours[f]
                 if self.__search_layer_break_condition__(c, f, q):
+                    # print("Broke here")
                     break
                 del candidates[c]
+                
             duration = datetime.datetime.now() - start
-            self.timeMap['search layer'].append(duration.total_seconds())
+            self.timeMap['SearchLayer'].append(duration.total_seconds())
             return neighbours
         
         except Exception as error:
@@ -354,11 +291,11 @@ class HNSW :
                     ep: str = self.__get_vector_by_distance__(W, batch_vector, 'nearest')
                 
                 self.entry_point_id = max(self.cache, key=lambda x: x[2])[0]
-                self.total_nodes += 1
+                self.total_nodes += len(self.cache)
                 self.cache = list()
 
             duration = datetime.datetime.now() - start
-            self.timeMap['insert'].append(duration.total_seconds())
+            self.timeMap['Insert'].append(duration.total_seconds())
             
         except Exception as error:
             raise InsertionError(str(error))
@@ -386,7 +323,7 @@ class HNSW :
                     break
                 del candidates[c]
             duration = datetime.datetime.now() - start
-            self.timeMap['search layer'].append(duration.total_seconds())
+            # self.timeMap['SearchLayer'].append(duration.total_seconds())
             return neighbours
         
         except Exception as error:
@@ -408,7 +345,7 @@ class HNSW :
             dists: Vector = nn.losses.cosine_similarity_loss(matrix, mx.expand_dims(q, axis=1).T)    
             idx = int(mx.argmax(dists)) if dist == 'nearest' else int(mx.argmin(dists))
             duration = datetime.datetime.now() - start
-            self.timeMap['vector distance'].append(duration.total_seconds())
+            # self.timeMap['GNBD'].append(duration.total_seconds())
             
             return list(vecIDs.keys())[idx]
         
@@ -445,7 +382,7 @@ class HNSW :
             
             sorted_vecs = sorted(vec_dist_tuple, key=lambda x: x[0], reverse=True)
             duration = datetime.datetime.now() - start
-            self.timeMap['search'].append(duration.total_seconds())
+            # self.timeMap['search'].append(duration.total_seconds())
             
             return sorted_vecs if len(sorted_vecs) < K else sorted_vecs[:K]
         
@@ -460,3 +397,18 @@ class HNSW :
         }
         print(json.dumps(avg, indent=2)) 
     
+
+# 1
+# {
+#   "bidirectionalConn": 0.0,
+#   "SearchLayer": 0.0219,
+#   "Insert": 0.0052,
+#   "CosineDist": 0.0003,
+#   "GNBD": 0.0006,
+#   "SearchNeighbour": 0.0066
+# }
+# {
+#   "precision": 1.0,
+#   "search_time": 1.209598,
+#   "construction_time": 0.513851
+# }

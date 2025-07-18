@@ -15,6 +15,14 @@ add_library(hnlx STATIC hnlx.cpp)
 
 add_executable(exec main.cpp)
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Enabling gprof profiling flags for Debug build.")
+    target_compile_options(hnlx PRIVATE -g)
+    target_link_options(hnlx PRIVATE -g)
+    target_compile_options(exec PRIVATE -g)
+    target_link_options(exec PRIVATE -g)
+endif()
+
 target_link_libraries(exec
     PRIVATE
         hnlx

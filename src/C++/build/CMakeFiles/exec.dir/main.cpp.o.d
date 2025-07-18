@@ -1086,4 +1086,5 @@ CMakeFiles/exec.dir/main.cpp.o: \
   /Users/astlesylvesterdsa/Projects/hnlx/src/C++/../../mlx/mlx/random.h \
   /Users/astlesylvesterdsa/Projects/hnlx/src/C++/../../mlx/mlx/transforms.h \
   /Users/astlesylvesterdsa/Projects/hnlx/src/C++/../../mlx/mlx/version.h \
-  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/unordered_set
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/unordered_set \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1/iomanip
